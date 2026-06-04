@@ -1,100 +1,92 @@
-# Flox + OrbStack/Docker: Development & Delivery Pattern
+# Traveling Ruby
 
-A proof of concept demonstrating how **Flox** and **OrbStack/Docker** complement
-each other for local development, CI, and production containerization.
+Companion repo for [A Pattern for Local Dev: Runtime on the Host, Services in Containers](https://flox.dev/blog/a-pattern-for-local-dev/).
 
-## The Pattern
+A Rails 8 API backed by PostgreSQL, with the same development environment declared three ways using **Flox**, **Nix**, and **Guix** — declared, graph-backed technologies that define the full runtime surface: language, native libraries, build toolchain, and CLI tools. A **mise** config is included to show where project-scoped version managers reach their limits.
 
-| Concern | Tool | Why |
-|---------|------|-----|
-| Language runtime, libs, CLI tools | **Flox** | Declarative, reproducible, inspectable |
-| Stateful services (PostgreSQL) | **Docker/OrbStack** | Volumes, init scripts, health checks |
-| CI runtime | **Flox** (via GitHub Actions) | Same packages as local dev |
-| Production packaging | **Docker** (Flox-informed) | Dockerfile mirrors declared runtime |
+## The pattern
 
-## What Flox does here
+The project runtime runs directly on the host, inside a declared environment. Backing services (PostgreSQL) run in containers. Engineers don't work inside containers; they connect to services using host, port, and credential settings defined in the environment.
 
-Flox manages the **application runtime layer**: Ruby 3.4, PostgreSQL client
-libraries, libyaml, build tools (gcc, make), and developer utilities (gum).
-The environment is defined in `.flox/env/manifest.toml` and activated with
-`flox activate`.
+## Why declared, graph-backed environments
 
-Every developer gets the exact same toolchain. No Homebrew drift, no version
-mismatches, no "install Ruby 3.4 and make sure you have libpq headers."
+This project doesn't just need Ruby. It also needs PostgreSQL client libraries, libyaml, a C compiler, make, pkg-config, curl, CA certificates, time zone data, and a few developer utilities. Flox, Nix, and Guix declare all of these as part of the project environment and resolve them deterministically via a package graph. mise can declare the Ruby version — the rest falls back to whatever the host system happens to provide.
 
-## What OrbStack/Docker does here
+## The four environments
 
-Docker (via OrbStack on macOS) runs **PostgreSQL** as a container with a named
-volume for persistence. This is the right tool for stateful services:
-`docker compose up -d` starts it, `docker compose down -v` resets it.
+| File | Tool | What it declares |
+|------|------|-----------------|
+| `.flox/env/manifest.toml` | [Flox](https://flox.dev) | Full runtime: Ruby, native libs, toolchain, env vars, aliases, services |
+| `flake.nix` | [Nix](https://nixos.org) | Full runtime: same packages, same shell hooks |
+| `manifest.scm` + `setup-env.sh` | [Guix](https://guix.gnu.org) | Full runtime: same packages, shell init sourced separately |
+| `.mise.toml` | [mise](https://mise.jdx.dev) | Ruby version, env vars, and task aliases only |
 
-The application itself does **not** run in a container during development.
+All four provide the same developer experience once activated: identical aliases (`dbup`, `dev`, `tests`, `rs`, `rc`, etc.), identical environment variables, and identical gem paths. The difference is in what they can declare — Flox, Nix, and Guix provide the native libraries and build toolchain that mise expects the host to supply.
 
-## What CI does here
-
-The GitHub Actions workflow installs Flox and runs tests inside `flox activate`.
-CI uses the same declared runtime as local development — no separate Ruby
-version matrix or system dependency list to maintain.
-
-## How the production container relates to the Flox runtime
-
-The `Dockerfile` is **Flox-informed**: it mirrors the runtime declared in the
-manifest using equivalent Debian packages. The mapping is explicit and documented
-in the Dockerfile header. See [DESIGN.md](DESIGN.md) for the full mapping table
-and tradeoff analysis.
-
-## Why this is not either/or
-
-- Flox replaces `rbenv` + `brew install libpq` + ad-hoc setup scripts
-- Docker replaces running PostgreSQL on the host
-- Neither replaces the other
-- Together they give you: reproducible runtime + managed stateful services +
-  clear CI alignment + traceable production packaging
-
-## Quick Start
+## Quick Start (Flox)
 
 ### Prerequisites
 
 - [Flox](https://flox.dev/docs/install-flox/) installed
-- [OrbStack](https://orbstack.dev/) (macOS) or Docker Engine (Linux)
+- Docker Engine (Linux) or Docker Desktop (macOS)
 
 ### Setup
 
 ```bash
-# 1. Clone and enter the Flox environment
 git clone https://github.com/flox/traveling-ruby && cd traveling-ruby
 flox activate
 
-# 2. Start PostgreSQL
+dbup                        # start PostgreSQL in Docker
+bundle install              # install gems
+bundle exec rails db:setup  # create and seed the database
+dev                         # start the Rails server
+```
+
+### Quick Start (Nix)
+
+```bash
+cd traveling-ruby
+nix develop
+
 dbup
-
-# 3. Bootstrap the database
+bundle install
 bundle exec rails db:setup
+dev
+```
 
-# 4. Run the app
+### Quick Start (Guix)
+
+```bash
+cd traveling-ruby
+guix shell -m manifest.scm
+source setup-env.sh
+
+dbup
+bundle install
+bundle exec rails db:setup
 dev
 ```
 
 ### Verify
 
 ```bash
-# Health check (proves DB connectivity)
 curl http://localhost:3000/health
+# => {"status":"ok","database":"connected"}
 
-# Create an item
+curl http://localhost:3000/items
+# => [{"id":1,"name":"Example Item","description":"Created by db:seed ..."}]
+
 curl -X POST http://localhost:3000/items \
   -H "Content-Type: application/json" \
-  -d '{"item": {"name": "Hello", "description": "From Flox + Docker"}}'
-
-# List items
-curl http://localhost:3000/items
+  -d '{"item": {"name": "Hello", "description": "From a declared environment"}}'
 ```
 
-### All Commands
+## All Commands
+
+These aliases are available in all four environments:
 
 | Command | What it does |
 |---------|-------------|
-| `flox activate` | Enter the development environment |
 | `dbup` | Start PostgreSQL container |
 | `dbdown` | Stop PostgreSQL container (data preserved) |
 | `dbreset` | Destroy and recreate database from scratch |
@@ -104,15 +96,28 @@ curl http://localhost:3000/items
 | `tests` | Run the test suite |
 | `build-image` | Build the production Docker image |
 
-### Reset everything
+In mise, these are invoked as `mise run dbup`, `mise run dev`, etc.
 
-```bash
-dbreset                   # Wipe and recreate the database
-# or
-docker compose down -v    # Just remove the container and volume
-```
+## Gem caches are isolated per environment
 
-### Build production image
+Each environment stores compiled gems in a separate cache directory to avoid native extension conflicts across different Ruby builds:
+
+| Environment | Cache directory |
+|---|---|
+| Flox | `$FLOX_ENV_CACHE/bundler/` (managed by Flox) |
+| Nix | `~/.cache/traveling-rails-poc-nix/bundler/` |
+| Guix | `~/.cache/traveling-rails-poc-guix/bundler/` |
+| mise | `~/.cache/traveling-rails-poc/bundler/` |
+
+Run `bundle install` once per environment.
+
+## CI
+
+The GitHub Actions workflow installs Flox and runs tests inside `flox activate`. CI uses the same declared runtime as local development — no separate Ruby version matrix or system dependency list to maintain.
+
+## Production container
+
+The `Dockerfile` mirrors the runtime declared in the environment manifests using equivalent Debian packages. The mapping is explicit and documented in the Dockerfile header. See [DESIGN.md](DESIGN.md) for details.
 
 ```bash
 build-image
@@ -124,60 +129,37 @@ docker run -p 3000:3000 \
   traveling-rails-poc
 ```
 
-## How this reduces environment drift
-
-Without Flox, a typical setup doc says: "Install Ruby 3.4, make sure you have
-libpq-dev and libyaml, install Bundler, run bundle install." Each developer
-interprets this differently, uses different package managers, and ends up with
-subtly different environments.
-
-With Flox, `flox activate` gives everyone the same Ruby, the same native
-libraries, the same tools — resolved from the same manifest, built
-reproducibly. The database still runs in Docker because that's what Docker is
-good at.
-
-## What remains container-specific
-
-The production Dockerfile handles concerns that don't belong in Flox:
-- Multi-stage builds (separating build deps from runtime)
-- Non-root user creation
-- Image layer optimization
-- `EXPOSE` and `CMD` directives
-- Debian-specific package names for the base image
-
-These are **packaging concerns**, not runtime concerns. The Flox manifest
-declares the runtime; the Dockerfile packages it for deployment.
-
 ## Repo Structure
 
 ```
 .
-├── .flox/                    # Flox environment (runtime declaration)
-│   └── env/manifest.toml     # ← the source of truth for app dependencies
-├── flake.nix                 # Nix equivalent of the Flox environment
-├── manifest.scm              # Guix equivalent of the Flox environment
-├── setup-env.sh              # Shell init for the Guix environment
+├── .flox/                    # Flox environment
+│   └── env/manifest.toml     #   packages, env vars, aliases, services
+├── flake.nix                 # Nix equivalent (nix develop)
+├── manifest.scm              # Guix equivalent (guix shell -m manifest.scm)
+├── setup-env.sh              #   shell init for the Guix environment
 ├── .mise.toml                # mise equivalent (languages + tasks only)
-├── .github/workflows/ci.yml  # CI uses Flox for runtime alignment
-├── docker-compose.yml        # PostgreSQL for local dev (OrbStack/Docker)
-├── Dockerfile                # Production image (Flox-informed)
+├── .github/workflows/ci.yml  # CI via Flox
+├── docker-compose.yml        # PostgreSQL for local dev
+├── Dockerfile                # Production image
 ├── scripts/                  # Developer workflow commands
-│   ├── dev                   # Start dev server
-│   ├── db-up                 # Start PostgreSQL
-│   ├── db-down               # Stop PostgreSQL
-│   ├── db-reset              # Reset database
-│   ├── test                  # Run tests
-│   └── build-image           # Build production image
+│   ├── dev                   #   start dev server
+│   ├── db-up                 #   start PostgreSQL
+│   ├── db-down               #   stop PostgreSQL
+│   ├── db-reset              #   reset database
+│   ├── test                  #   run tests
+│   └── build-image           #   build production image
 ├── app/                      # Rails application
 ├── config/                   # Rails configuration
 ├── db/                       # Migrations and seeds
 ├── test/                     # Test suite
-├── DESIGN.md                 # Architecture and tradeoff analysis
-└── README.md                 # This file
+└── DESIGN.md                 # Architecture and tradeoff analysis
 ```
 
 ## Further Reading
 
-- [DESIGN.md](DESIGN.md) — detailed architecture notes and tradeoff analysis
+- [DESIGN.md](DESIGN.md) — architecture notes and tradeoff analysis
 - [Flox documentation](https://flox.dev/docs/)
-- [OrbStack documentation](https://orbstack.dev/)
+- [Nix manual](https://nixos.org/manual/nix/stable/)
+- [Guix manual](https://guix.gnu.org/manual/)
+- [mise documentation](https://mise.jdx.dev/)
