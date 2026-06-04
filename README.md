@@ -117,7 +117,7 @@ The GitHub Actions workflow installs Flox and runs tests inside `flox activate`.
 
 ## Production container
 
-The `Dockerfile` mirrors the runtime declared in the environment manifests using equivalent Debian packages. The mapping is explicit and documented in the Dockerfile header. See [DESIGN.md](DESIGN.md) for details.
+The `Dockerfile` mirrors the runtime declared in the environment manifests using equivalent Debian packages. The mapping is explicit and documented in the Dockerfile header.
 
 ```bash
 build-image
@@ -152,13 +152,11 @@ docker run -p 3000:3000 \
 ├── app/                      # Rails application
 ├── config/                   # Rails configuration
 ├── db/                       # Migrations and seeds
-├── test/                     # Test suite
-└── DESIGN.md                 # Architecture and tradeoff analysis
+└── test/                     # Test suite
 ```
 
 ## Further Reading
 
-- [DESIGN.md](DESIGN.md) — architecture notes and tradeoff analysis
 - [Flox documentation](https://flox.dev/docs/)
 - [Nix manual](https://nixos.org/manual/nix/stable/)
 - [Guix manual](https://guix.gnu.org/manual/)
