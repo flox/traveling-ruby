@@ -2,7 +2,7 @@
 
 Companion repo for [A Pattern for Local Dev: Runtime on the Host, Services in Containers](https://flox.dev/blog/a-pattern-for-local-dev-runtime-on-the-host-services-in-containers/).
 
-A Rails 8 API backed by PostgreSQL, with the same development environment declared three ways using **Flox**, **Nix**, and **Guix** — declared, graph-backed technologies that define the full runtime surface: language, native libraries, build toolchain, and CLI tools. A **mise** config is included to show where project-scoped version managers reach their limits.
+A Rails 8 API backed by PostgreSQL, with the same development environment declared three ways using **Flox**, **Nix**, and **Guix** — declared, graph-backed technologies that define the full runtime surface: language, native libraries, build toolchain, and CLI tools.
 
 ## The pattern
 
@@ -10,18 +10,17 @@ The project runtime runs directly on the host, inside a declared environment. Ba
 
 ## Why declared, graph-backed environments
 
-This project doesn't just need Ruby. It also needs PostgreSQL client libraries, libyaml, a C compiler, make, pkg-config, curl, CA certificates, time zone data, and a few developer utilities. Flox, Nix, and Guix declare all of these as part of the project environment and resolve them deterministically via a package graph. mise can declare the Ruby version — the rest falls back to whatever the host system happens to provide.
+This project doesn't just need Ruby. It also needs PostgreSQL client libraries, libyaml, a C compiler, make, pkg-config, curl, CA certificates, time zone data, and a few developer utilities. Flox, Nix, and Guix declare all of these as part of the project environment and resolve them deterministically via a package graph.
 
-## The four environments
+## The three environments
 
 | File | Tool | What it declares |
 |------|------|-----------------|
 | `.flox/env/manifest.toml` | [Flox](https://flox.dev) | Full runtime: Ruby, native libs, toolchain, env vars, aliases, services |
 | `flake.nix` | [Nix](https://nixos.org) | Full runtime: same packages, same shell hooks |
 | `manifest.scm` + `setup-env.sh` | [Guix](https://guix.gnu.org) | Full runtime: same packages, shell init sourced separately |
-| `.mise.toml` | [mise](https://mise.jdx.dev) | Ruby version, env vars, and task aliases only |
 
-All four provide the same developer experience once activated: identical aliases (`dbup`, `dev`, `tests`, `rs`, `rc`, etc.), identical environment variables, and identical gem paths. The difference is in what they can declare — Flox, Nix, and Guix provide the native libraries and build toolchain that mise expects the host to supply.
+All three provide the same developer experience once activated: identical aliases (`dbup`, `dev`, `tests`, `rs`, `rc`, etc.), identical environment variables, and identical gem paths.
 
 ## Quick Start (Flox)
 
@@ -83,7 +82,7 @@ curl -X POST http://localhost:3000/items \
 
 ## All Commands
 
-These aliases are available in all four environments:
+These aliases are available in all three environments:
 
 | Command | What it does |
 |---------|-------------|
@@ -96,7 +95,6 @@ These aliases are available in all four environments:
 | `tests` | Run the test suite |
 | `build-image` | Build the production Docker image |
 
-In mise, these are invoked as `mise run dbup`, `mise run dev`, etc.
 
 ## Gem caches are isolated per environment
 
@@ -107,7 +105,6 @@ Each environment stores compiled gems in a separate cache directory to avoid nat
 | Flox | `$FLOX_ENV_CACHE/bundler/` (managed by Flox) |
 | Nix | `~/.cache/traveling-rails-poc-nix/bundler/` |
 | Guix | `~/.cache/traveling-rails-poc-guix/bundler/` |
-| mise | `~/.cache/traveling-rails-poc/bundler/` |
 
 Run `bundle install` once per environment.
 
@@ -138,7 +135,6 @@ docker run -p 3000:3000 \
 ├── flake.nix                 # Nix equivalent (nix develop)
 ├── manifest.scm              # Guix equivalent (guix shell -m manifest.scm)
 ├── setup-env.sh              #   shell init for the Guix environment
-├── .mise.toml                # mise equivalent (languages + tasks only)
 ├── .github/workflows/ci.yml  # CI via Flox
 ├── docker-compose.yml        # PostgreSQL for local dev
 ├── Dockerfile                # Production image
@@ -160,4 +156,3 @@ docker run -p 3000:3000 \
 - [Flox documentation](https://flox.dev/docs/)
 - [Nix manual](https://nixos.org/manual/nix/stable/)
 - [Guix manual](https://guix.gnu.org/manual/)
-- [mise documentation](https://mise.jdx.dev/)
