@@ -1,0 +1,153 @@
+schema-version = "1.10.0"
+
+# =============================================================================
+# Flox + OrbStack/Docker Proof of Concept
+# =============================================================================
+# This manifest declares the APPLICATION RUNTIME — everything the Rails app
+# needs to run, build gems, and support developer workflows.
+#
+# What this manifest does NOT manage:
+#   - PostgreSQL server (runs in Docker via docker-compose.yml)
+#   - Production container packaging (handled by Dockerfile)
+#
+# The declared packages here are the source of truth that informs both
+# CI (GitHub Actions installs Flox) and the production Dockerfile.
+# =============================================================================
+
+[install]
+# Language runtime
+ruby.pkg-path = "ruby"                   # Ruby 3.4.x — the app runtime
+
+# Database client (for pg gem compilation and CLI tools like psql)
+postgresql.pkg-path = "postgresql"       # PostgreSQL client libs + psql CLI
+
+# Native library dependencies (required for gem compilation)
+libyaml.pkg-path = "libyaml"             # Required by psych gem (YAML parsing)
+
+# Build toolchain (for compiling native gem extensions)
+# On macOS, gcc from nixpkgs is a broken clang wrapper that can't find the SDK.
+# Use clang on darwin, gcc on linux.
+clang.pkg-path = "clang"                 # C compiler for macOS native extensions
+clang.systems = ["aarch64-darwin", "x86_64-darwin"]
+gcc.pkg-path = "gcc"                     # C compiler for Linux native extensions
+gcc.systems = ["aarch64-linux", "x86_64-linux"]
+gnumake.pkg-path = "gnumake"             # Make for native extension builds
+pkg-config.pkg-path = "pkg-config"       # Finds library paths for compilation
+
+# production runtime dependencies
+cacert.pkg-path = "cacert"               # CA certificates for HTTPS requests
+tzdata.pkg-path = "tzdata"               # Time zone data for local/dev parity
+
+# Developer utilities
+curl.pkg-path = "curl"                   # HTTP client for API testing
+gum.pkg-path = "gum"                     # Styled terminal output
+
+# Cross-platform compatibility
+coreutils.pkg-path = "coreutils"         # GNU coreutils (consistent across OS)
+gnused.pkg-path = "gnused"               # GNU sed (macOS ships BSD sed)
+
+
+[vars]
+# Invariant variables — these don't change between developers
+APP_NAME = "traveling-rails-poc"
+
+
+[hook]
+on-activate = '''
+# Runtime-configurable variables (override with: VAR=value flox activate)
+export DATABASE_HOST="${DATABASE_HOST:-localhost}"
+export DATABASE_PORT="${DATABASE_PORT:-5432}"
+export DATABASE_USER="${DATABASE_USER:-postgres}"
+export DATABASE_PASSWORD="${DATABASE_PASSWORD:-postgres}"
+export RAILS_ENV="${RAILS_ENV:-development}"
+
+# Ruby/Bundler environment — store everything in Flox cache
+RUBY_LIB_VERSION="3.4.0"
+export BUNDLE_PATH="$FLOX_ENV_CACHE/bundler"
+export BUNDLE_BIN="$FLOX_ENV_CACHE/bundler/bin"
+export GEM_HOME="$FLOX_ENV_CACHE/bundler/ruby/$RUBY_LIB_VERSION"
+export GEM_PATH="$GEM_HOME/gems:${GEM_PATH:-}"
+export BOOTSNAP_CACHE_DIR="$FLOX_ENV_CACHE/bootsnap"
+export PATH="$FLOX_ENV_PROJECT/bin:$BUNDLE_BIN:$GEM_HOME/bin:$PATH"
+
+# Ensure pkg-config can find libyaml for psych gem compilation.
+# Flox installs the library but not the -dev split (headers + .pc file).
+if ! pkg-config --exists yaml-0.1 2>/dev/null; then
+    _libyaml_pc="$(find /nix/store -maxdepth 4 -name "yaml-0.1.pc" -path "*libyaml*" 2>/dev/null | head -1)"
+    if [ -n "$_libyaml_pc" ]; then
+        export PKG_CONFIG_PATH="$(dirname "$_libyaml_pc"):${PKG_CONFIG_PATH:-}"
+        # Also add the dev headers to CPATH
+        _libyaml_dev="$(dirname "$(dirname "$_libyaml_pc")")"
+        if [ -d "$_libyaml_dev/include" ]; then
+            export CPATH="$_libyaml_dev/include:${CPATH:-}"
+        fi
+    fi
+    unset _libyaml_pc _libyaml_dev
+fi
+
+# macOS SIP ignores DYLD_LIBRARY_PATH, so use LD_LIBRARY_PATH for FFI
+if [ "$(uname -s)" = "Darwin" ]; then
+    export LD_LIBRARY_PATH="$FLOX_ENV/lib:${LD_LIBRARY_PATH:-}"
+fi
+'''
+
+
+[profile]
+common = '''
+# Aliases
+alias be="bundle exec"
+alias rs="bundle exec rails server -b 0.0.0.0"
+alias rc="bundle exec rails console"
+alias dbup="$FLOX_ENV_PROJECT/scripts/db-up"
+alias dbdown="$FLOX_ENV_PROJECT/scripts/db-down"
+alias dbreset="$FLOX_ENV_PROJECT/scripts/db-reset"
+alias dev="$FLOX_ENV_PROJECT/scripts/dev"
+alias tests="$FLOX_ENV_PROJECT/scripts/test"
+alias build-image="$FLOX_ENV_PROJECT/scripts/build-image"
+
+# Wrap bundle to auto-generate binstubs after install
+bundle() {
+    local run_binstubs=0
+
+    if (( $# == 0 )); then
+        run_binstubs=1
+    elif [[ "$1" == "install" ]]; then
+        run_binstubs=1
+    fi
+
+    command bundle "$@"
+    local rc=$?
+
+    if (( rc == 0 && run_binstubs == 1 )); then
+        command bundle binstubs --all
+    fi
+
+    return $rc
+}
+
+# Display environment info
+gum style \
+    --foreground 212 --border-foreground 212 --border double \
+    --align center --width 56 --margin "1 0" --padding "1 2" \
+    "$APP_NAME" \
+    "" \
+    "Ruby $(ruby --version | cut -d' ' -f2)" \
+    "Rails app · PostgreSQL in Docker"
+
+gum style --foreground 248 \
+    "  Database: $DATABASE_HOST:$DATABASE_PORT" \
+    "  Scripts:  scripts/{dev,db-up,db-down,db-reset,test}" \
+    "  Run:      bundle install  (first time setup)"
+'''
+
+
+[services]
+# OrbStack provides the Docker runtime on macOS
+orbstack.command = "orb start"
+orbstack.is-daemon = true
+orbstack.shutdown.command = "orb stop"
+orbstack.systems = ["aarch64-darwin", "x86_64-darwin"]
+
+
+[options]
+systems = ["aarch64-darwin", "aarch64-linux", "x86_64-darwin", "x86_64-linux"]

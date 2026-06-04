@@ -1,0 +1,117 @@
+# .mise.toml — mise equivalent of the Flox/Nix/Guix environment
+#
+# This file declares everything mise CAN manage for this project.
+# Compare it to .flox/env/manifest.toml, flake.nix, or manifest.scm
+# to see what falls outside mise's scope.
+#
+# Usage:
+#   mise install        # installs Ruby (and only Ruby)
+#   mise activate       # sets PATH + env vars for this shell
+
+# ---------------------------------------------------------------------------
+# Tool versions — mise's core strength
+# ---------------------------------------------------------------------------
+[tools]
+ruby = "3.4"
+
+# mise can install language runtimes and standalone CLI tools.
+# It CAN also install gum via its ubi backend:
+#   "ubi:charmbracelet/gum" = "latest"
+#
+# But it has no mechanism for C libraries, headers, or toolchains:
+#   - postgresql client libs (libpq, psql)   -> apt install libpq-dev / brew install postgresql
+#   - libyaml (headers + shared lib)         -> apt install libyaml-dev / brew install libyaml
+#   - curl                                   -> apt install curl / brew install curl
+#   - gcc or clang                           -> apt install build-essential / xcode-select --install
+#   - gnumake                                -> usually pre-installed, but not guaranteed
+#   - pkg-config                             -> apt install pkg-config / brew install pkg-config
+#   - CA certificates bundle                 -> system-provided
+#   - tzdata                                 -> system-provided
+#   - GNU coreutils / GNU sed (on macOS)     -> brew install coreutils gnu-sed
+#
+# These native dependencies must be documented in a README and installed
+# manually (or via apt/brew/pacman) before `bundle install` will succeed.
+# Each distro uses different package names:
+#
+#   Ubuntu/Debian:  sudo apt install libpq-dev libyaml-dev curl build-essential pkg-config
+#   Fedora/RHEL:    sudo dnf install postgresql-devel libyaml-devel curl gcc make pkgconf-pkg-config
+#   Arch:           sudo pacman -S postgresql-libs libyaml curl base-devel pkgconf
+#   macOS:          brew install postgresql libyaml curl pkg-config
+#
+# In Flox, Nix, and Guix all of these are declared once and resolved
+# automatically — no README, no per-distro instructions.
+
+# ---------------------------------------------------------------------------
+# Environment variables — mise handles these well
+# ---------------------------------------------------------------------------
+[env]
+APP_NAME = "traveling-rails-poc"
+
+# Database connection (override per-developer with .mise.local.toml)
+DATABASE_HOST = "localhost"
+DATABASE_PORT = "5432"
+DATABASE_USER = "postgres"
+DATABASE_PASSWORD = "postgres"
+RAILS_ENV = "development"
+
+# Ruby/Bundler paths — store gems in a project-local cache
+BUNDLE_PATH = "{{env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache')}}/traveling-rails-poc/bundler"
+BUNDLE_BIN  = "{{env.BUNDLE_PATH}}/bin"
+GEM_HOME    = "{{env.BUNDLE_PATH}}/ruby/3.4.0"
+GEM_PATH    = "{{env.GEM_HOME}}/gems"
+BOOTSNAP_CACHE_DIR = "{{env.XDG_CACHE_HOME | default(value=env.HOME ~ '/.cache')}}/traveling-rails-poc/bootsnap"
+
+# _.path must come after the vars it references (mise evaluates [env] in order)
+_.path = ["./bin", "{{env.BUNDLE_BIN}}", "{{env.GEM_HOME}}/bin"]
+
+# What mise CANNOT set here:
+#   - PKG_CONFIG_PATH pointing to libyaml's .pc file (no libyaml to point to)
+#   - CPATH for libyaml headers (no headers to point to)
+#   - LD_LIBRARY_PATH / DYLD_LIBRARY_PATH for Nix/Guix store paths (N/A)
+#   - SSL_CERT_FILE / TZDIR (system-dependent, not portable across distros)
+
+# ---------------------------------------------------------------------------
+# Tasks — mise's equivalent of Flox [profile] aliases
+# ---------------------------------------------------------------------------
+[tasks.server]
+description = "Start Rails dev server"
+run = "bundle exec rails server -b 0.0.0.0"
+alias = "rs"
+
+[tasks.console]
+description = "Start Rails console"
+run = "bundle exec rails console"
+alias = "rc"
+
+[tasks.dev]
+description = "Start dev server"
+run = "scripts/dev"
+
+[tasks.tests]
+description = "Run test suite"
+run = "scripts/test"
+
+[tasks.build-image]
+description = "Build production Docker image"
+run = "scripts/build-image"
+
+[tasks.dbup]
+description = "Start PostgreSQL in Docker"
+run = "scripts/db-up"
+
+[tasks.dbdown]
+description = "Stop PostgreSQL container"
+run = "scripts/db-down"
+
+[tasks.dbreset]
+description = "Reset database"
+run = "scripts/db-reset"
+
+# What mise tasks CANNOT replicate:
+#   - The `bundle()` shell function wrapper that auto-generates binstubs
+#     (mise tasks and hooks run as subprocesses — they can't define shell
+#     functions or modify the current shell's state)
+#   - The `gum style` welcome banner COULD use `[hooks] enter = "..."`,
+#     but the hook runs in a subprocess, not the interactive shell
+#   - The Flox OrbStack service (auto-start/stop of Docker daemon on macOS)
+#     (mise has no service management)

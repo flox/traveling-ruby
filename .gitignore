@@ -1,0 +1,27 @@
+# Ruby / Bundler
+/.bundle
+vendor/bundle
+
+# Rails
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+
+# Rails credentials
+/config/master.key
+
+# Environment-specific overrides
+.env
+.env.*
+
+# Flox gem/bootsnap cache
+.flox/cache/
+
+# Nix
+result
+
+# mise local overrides
+.mise.local.toml
