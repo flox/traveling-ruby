@@ -1,6 +1,6 @@
 # Traveling Ruby
 
-Companion repo for [A Pattern for Local Dev: Runtime on the Host, Services in Containers](https://flox.dev/blog/a-pattern-for-local-dev/).
+Companion repo for [A Pattern for Local Dev: Runtime on the Host, Services in Containers](https://flox.dev/blog/a-pattern-for-local-dev-runtime-on-the-host-services-in-containers/).
 
 A Rails 8 API backed by PostgreSQL, with the same development environment declared three ways using **Flox**, **Nix**, and **Guix** — declared, graph-backed technologies that define the full runtime surface: language, native libraries, build toolchain, and CLI tools. A **mise** config is included to show where project-scoped version managers reach their limits.
 
